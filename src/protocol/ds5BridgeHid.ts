@@ -14,6 +14,7 @@ const REPORT_GET_VERSION = 0xf8;
 const REPORT_GET_RSSI    = 0xf9;
 const REPORT_GET_SLOTS   = 0xfa;
 const REPORT_GET_DIAG    = 0xfb;
+const REPORT_GET_CPU     = 0xfc;
 const CMD_UPDATE_CONFIG = 0x01;
 const CMD_SAVE_TO_FLASH = 0x02;
 const CMD_RECONNECT_USB = 0x03;
@@ -128,6 +129,37 @@ export class Ds5BridgeHidClient {
       peakSpeaker:   view.getUint8(12),
       peakHaptic:    view.getUint8(13),
       hciErrors:     view.getUint32(14, true),
+    };
+  }
+
+  // 11-byte CPU/Clock telemetry payload (see firmware src/cmd.cpp 0xfc).
+  // Firmware sends raw values; the volts/temperature math lives here and
+  // mirrors render_screen_cpu() so device and web agree.
+  async readCpuRaw(): Promise<{
+    setFreqMhz: number; realFreqMhz: number; vcoreV: number; tempC: number;
+  }> {
+    await this.open();
+    const report = await this.device.receiveFeatureReport(REPORT_GET_CPU);
+    const view = new DataView(report.buffer, report.byteOffset + 1, 11);
+    const setKhz  = view.getUint32(0, true);
+    const realKhz = view.getUint32(4, true);
+    const vcode   = view.getUint8(8);
+    const tempRaw = view.getUint16(9, true);
+
+    // vreg_voltage enum: codes 0..15 are linear 0.05 V steps from 0.55 V
+    // (covers 0.55–1.30 V; the only range this firmware uses). >15 is the
+    // non-linear high range — not used here, fall back to NaN.
+    const vcoreV = vcode <= 0b01111 ? (550 + 50 * vcode) / 1000 : NaN;
+
+    // RP2350 temp sensor, same formula as the firmware screen.
+    const volts = (tempRaw * 3.3) / 4096;
+    const tempC = 27 - (volts - 0.706) / 0.001721;
+
+    return {
+      setFreqMhz: setKhz / 1000,
+      realFreqMhz: realKhz / 1000,
+      vcoreV,
+      tempC,
     };
   }
 

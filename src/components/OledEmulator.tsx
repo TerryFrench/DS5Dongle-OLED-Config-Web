@@ -6,8 +6,8 @@
 //     mock data. Banner reads "Live demo — connect a controller for real
 //     values."
 //   - Controller connected: live data via WebHID input reports + the
-//     feature reports added in firmware commit 8bef1d2 (0xFA slots,
-//     0xFB diagnostics).
+//     feature reports added in firmware (0xFA slots, 0xFB diagnostics,
+//     0xFC CPU/Clock telemetry).
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, ChevronLeft, Pause, Play } from "lucide-react";
@@ -73,16 +73,18 @@ export default function OledEmulator({ client }: OledEmulatorProps) {
     let cancelled = false;
     const tick = async () => {
       try {
-        const [config, slots, diag, rssi] = await Promise.all([
+        const [config, slots, diag, rssi, cpu] = await Promise.all([
           client.readConfig(),
           client.readSlotsRaw().catch(() => null),
           client.readDiagRaw().catch(() => null),
           client.readRssi().catch(() => 0),
+          client.readCpuRaw().catch(() => null),
         ]);
         if (cancelled) return;
         const s = stateRef.current;
         s.config = config;
         s.rssi = rssi;
+        if (cpu) s.cpu = cpu;
         if (slots) {
           s.slots = {
             addrs: slots.addrs.map((a) => Array.from(a)),

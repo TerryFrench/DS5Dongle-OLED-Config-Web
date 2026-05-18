@@ -47,9 +47,9 @@ export interface DiagSnapshot {
   btRate?: number;        // computed packets/s
 }
 
-// Mirrors the firmware CPU/Clock screen. Not available over the config HID
-// protocol (the device only shows it on its own OLED), so the preview uses
-// representative values.
+// Mirrors the firmware CPU/Clock screen. Read live from the device over HID
+// report 0xfc when connected (DS5BridgeHid.readCpuRaw); demo mode falls back
+// to representative mock values.
 export interface CpuSnapshot {
   setFreqMhz: number;   // configured target (SYS_CLOCK_KHZ / 1000)
   realFreqMhz: number;  // clk_sys measured by the on-chip frequency counter
