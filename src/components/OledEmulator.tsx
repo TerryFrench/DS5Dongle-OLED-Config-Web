@@ -17,6 +17,7 @@ import { FB_W, FB_H, flush, newFramebuffer } from "../oled/canvas";
 import PicoBoardFrame from "./PicoBoardFrame";
 import { decodeInputReport, emptyInputReport } from "../oled/inputReport";
 import {
+  mockCpu,
   mockDiag,
   mockInputReport,
   mockRssi,
@@ -146,6 +147,7 @@ export default function OledEmulator({ client }: OledEmulatorProps) {
           prevBtPackets: md.btPackets,
         };
         s.rssi = mockRssi(mockRef.current);
+        s.cpu = mockCpu(mockRef.current);
       }
 
       // Auto-cycle screens.
