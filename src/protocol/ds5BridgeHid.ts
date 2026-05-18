@@ -19,6 +19,22 @@ const CMD_UPDATE_CONFIG = 0x01;
 const CMD_SAVE_TO_FLASH = 0x02;
 const CMD_RECONNECT_USB = 0x03;
 
+export interface HidReportProbe {
+  id: number;
+  name: string;
+  declared: boolean;   // present in the device's parsed HID report descriptor
+  ok?: boolean;        // receiveFeatureReport resolved
+  byteLength?: number; // payload size on success
+  error?: string;      // "<ErrorName>: <message>" on failure
+}
+
+export interface HidDiagnostics {
+  productId: number;
+  declaredFeatureIds: number[];
+  declaredInputIds: number[];
+  probes: HidReportProbe[];
+}
+
 export class Ds5BridgeHidClient {
   constructor(public readonly device: HIDDevice) {}
 
@@ -160,6 +176,64 @@ export class Ds5BridgeHidClient {
       realFreqMhz: realKhz / 1000,
       vcoreV,
       tempC,
+    };
+  }
+
+  // Read-only diagnostic: which feature report IDs did Chrome parse from the
+  // device's HID report descriptor, and what happens when we actually try to
+  // GET each of the OLED Edition vendor reports. Pure reads (no sendReport),
+  // so it is side-effect free on the firmware. Used to find out *why* the
+  // slots/diag/cpu telemetry reads don't return data, instead of guessing.
+  async diagnoseFeatureReports(): Promise<HidDiagnostics> {
+    await this.open();
+
+    const declaredFeatureIds = new Set<number>();
+    const declaredInputIds = new Set<number>();
+    const collect = (cols: HIDCollectionInfo[] | undefined) => {
+      for (const c of cols ?? []) {
+        for (const r of c.featureReports ?? []) {
+          if (typeof r.reportId === "number") declaredFeatureIds.add(r.reportId);
+        }
+        for (const r of c.inputReports ?? []) {
+          if (typeof r.reportId === "number") declaredInputIds.add(r.reportId);
+        }
+        collect(c.children);
+      }
+    };
+    collect(this.device.collections);
+
+    const probeIds: Array<{ id: number; name: string }> = [
+      { id: REPORT_GET_CONFIG, name: "config (known-good)" },
+      { id: REPORT_GET_VERSION, name: "version" },
+      { id: REPORT_GET_RSSI, name: "rssi" },
+      { id: REPORT_GET_SLOTS, name: "slots" },
+      { id: REPORT_GET_DIAG, name: "diagnostics" },
+      { id: REPORT_GET_CPU, name: "cpu/clock" },
+    ];
+
+    const probes: HidReportProbe[] = [];
+    for (const { id, name } of probeIds) {
+      const declared = declaredFeatureIds.has(id);
+      try {
+        const report = await this.device.receiveFeatureReport(id);
+        probes.push({
+          id, name, declared, ok: true,
+          byteLength: report.byteLength,
+        });
+      } catch (e) {
+        const err = e as { name?: string; message?: string };
+        probes.push({
+          id, name, declared, ok: false,
+          error: `${err.name ?? "Error"}: ${err.message ?? String(e)}`,
+        });
+      }
+    }
+
+    return {
+      productId: this.device.productId,
+      declaredFeatureIds: [...declaredFeatureIds].sort((a, b) => a - b),
+      declaredInputIds: [...declaredInputIds].sort((a, b) => a - b),
+      probes,
     };
   }
 

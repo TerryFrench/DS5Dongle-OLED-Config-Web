@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, ChevronLeft, Pause, Play } from "lucide-react";
 import { Trans, useTranslation } from "react-i18next";
-import { Ds5BridgeHidClient } from "../protocol/ds5BridgeHid";
+import { Ds5BridgeHidClient, HidDiagnostics } from "../protocol/ds5BridgeHid";
 import { FB_W, FB_H, flush, newFramebuffer } from "../oled/canvas";
 import PicoBoardFrame from "./PicoBoardFrame";
 import { decodeInputReport, emptyInputReport } from "../oled/inputReport";
@@ -43,6 +43,7 @@ export default function OledEmulator({ client }: OledEmulatorProps) {
   const fbRef = useRef<Uint8Array>(newFramebuffer());
   const [, setRenderTick] = useState(0);
   const [autoCycle, setAutoCycle] = useState(true);
+  const [hidDiag, setHidDiag] = useState<HidDiagnostics | null>(null);
   const lastAutoCycleRef = useRef<number>(performance.now());
 
   const isConnected = !!client?.device.opened;
@@ -65,6 +66,43 @@ export default function OledEmulator({ client }: OledEmulatorProps) {
       stateRef.current.input = decodeInputReport(data);
     });
     return unsub;
+  }, [client]);
+
+  // Read-only HID diagnostic, run once per connection. Surfaces which
+  // feature reports Chrome parsed from the descriptor and what each GET
+  // actually does — to root-cause the slots/diag/cpu telemetry reads
+  // without changing firmware. Logged to the console and shown in-UI.
+  useEffect(() => {
+    if (!client) { setHidDiag(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const d = await client.diagnoseFeatureReports();
+        if (cancelled) return;
+        setHidDiag(d);
+        const hex = (n: number) => "0x" + n.toString(16).toUpperCase();
+        // eslint-disable-next-line no-console
+        console.groupCollapsed(
+          `[HID diag] pid=${hex(d.productId)} ` +
+          `feature=[${d.declaredFeatureIds.map(hex).join(", ")}] ` +
+          `input=[${d.declaredInputIds.map(hex).join(", ")}]`,
+        );
+        for (const p of d.probes) {
+          // eslint-disable-next-line no-console
+          console.log(
+            `${hex(p.id)} ${p.name}: ` +
+            `${p.declared ? "declared" : "NOT declared"} — ` +
+            (p.ok ? `OK ${p.byteLength}B` : `FAIL ${p.error}`),
+          );
+        }
+        // eslint-disable-next-line no-console
+        console.groupEnd();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn("[HID diag] failed", e);
+      }
+    })();
+    return () => { cancelled = true; };
   }, [client]);
 
   // Poll feature reports for data not in the input stream.
@@ -258,6 +296,38 @@ export default function OledEmulator({ client }: OledEmulatorProps) {
           {autoCycle ? t("preview.autoCycleOn") : t("preview.autoCycleOff")}
         </button>
       </div>
+
+      {isConnected && hidDiag && (
+        <details
+          className="oled-hid-diag"
+          style={{
+            marginTop: 8, fontFamily: "monospace", fontSize: 11,
+            opacity: 0.8, maxWidth: 360,
+          }}
+        >
+          <summary style={{ cursor: "pointer" }}>
+            HID diagnostic ({hidDiag.probes.filter((p) => p.ok).length}/
+            {hidDiag.probes.length} reads OK)
+          </summary>
+          <div style={{ marginTop: 4, lineHeight: 1.5 }}>
+            <div>
+              declared feature reports:{" "}
+              {hidDiag.declaredFeatureIds.length
+                ? hidDiag.declaredFeatureIds
+                    .map((n) => "0x" + n.toString(16).toUpperCase())
+                    .join(", ")
+                : "(none)"}
+            </div>
+            {hidDiag.probes.map((p) => (
+              <div key={p.id}>
+                0x{p.id.toString(16).toUpperCase()} {p.name}:{" "}
+                {p.declared ? "declared" : "NOT declared"} —{" "}
+                {p.ok ? `OK ${p.byteLength}B` : `FAIL ${p.error}`}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }
