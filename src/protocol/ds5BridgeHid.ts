@@ -148,36 +148,13 @@ export class Ds5BridgeHidClient {
     };
   }
 
-  // 11-byte CPU/Clock telemetry payload (see firmware src/cmd.cpp 0xfc).
-  // Firmware sends raw values; the volts/temperature math lives here and
-  // mirrors render_screen_cpu() so device and web agree.
-  async readCpuRaw(): Promise<{
-    setFreqMhz: number; realFreqMhz: number; vcoreV: number; tempC: number;
-  }> {
-    await this.open();
-    const report = await this.device.receiveFeatureReport(REPORT_GET_CPU);
-    const view = new DataView(report.buffer, report.byteOffset + 1, 11);
-    const setKhz  = view.getUint32(0, true);
-    const realKhz = view.getUint32(4, true);
-    const vcode   = view.getUint8(8);
-    const tempRaw = view.getUint16(9, true);
-
-    // vreg_voltage enum: codes 0..15 are linear 0.05 V steps from 0.55 V
-    // (covers 0.55–1.30 V; the only range this firmware uses). >15 is the
-    // non-linear high range — not used here, fall back to NaN.
-    const vcoreV = vcode <= 0b01111 ? (550 + 50 * vcode) / 1000 : NaN;
-
-    // RP2350 temp sensor, same formula as the firmware screen.
-    const volts = (tempRaw * 3.3) / 4096;
-    const tempC = 27 - (volts - 0.706) / 0.001721;
-
-    return {
-      setFreqMhz: setKhz / 1000,
-      realFreqMhz: realKhz / 1000,
-      vcoreV,
-      tempC,
-    };
-  }
+  // NOTE: there is intentionally no readCpuRaw(). The firmware exposes
+  // CPU/Clock telemetry on feature report 0xFC, but Chrome WebHID rejects
+  // any report ID not declared in the HID descriptor, and declaring the
+  // OLED Edition vendor reports breaks DualSense enumeration on Windows
+  // (verified twice on real hardware — see CHANGELOG). The CPU preview
+  // therefore uses representative mock values. REPORT_GET_CPU is kept only
+  // so the diagnostic below can probe and document the failure.
 
   // Read-only diagnostic: which feature report IDs did Chrome parse from the
   // device's HID report descriptor, and what happens when we actually try to

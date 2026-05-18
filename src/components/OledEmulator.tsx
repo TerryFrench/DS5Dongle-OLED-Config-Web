@@ -111,18 +111,22 @@ export default function OledEmulator({ client }: OledEmulatorProps) {
     let cancelled = false;
     const tick = async () => {
       try {
-        const [config, slots, diag, rssi, cpu] = await Promise.all([
+        // NOTE: CPU/Clock telemetry (firmware report 0xfc) is intentionally
+        // not read here. Chrome WebHID requires the report be declared in
+        // the HID descriptor, and declaring the OLED Edition vendor reports
+        // breaks DualSense enumeration on Windows (verified twice on real
+        // hardware). The CPU preview stays on representative mock values;
+        // see the read-only HID diagnostic below for the evidence.
+        const [config, slots, diag, rssi] = await Promise.all([
           client.readConfig(),
           client.readSlotsRaw().catch(() => null),
           client.readDiagRaw().catch(() => null),
           client.readRssi().catch(() => 0),
-          client.readCpuRaw().catch(() => null),
         ]);
         if (cancelled) return;
         const s = stateRef.current;
         s.config = config;
         s.rssi = rssi;
-        if (cpu) s.cpu = cpu;
         if (slots) {
           s.slots = {
             addrs: slots.addrs.map((a) => Array.from(a)),
@@ -187,8 +191,12 @@ export default function OledEmulator({ client }: OledEmulatorProps) {
           prevBtPackets: md.btPackets,
         };
         s.rssi = mockRssi(mockRef.current);
-        s.cpu = mockCpu(mockRef.current);
       }
+
+      // CPU/Clock has no live source over WebHID (see ds5BridgeHid.ts), so
+      // it is always animated mock — connected or not — rather than freezing
+      // on the default snapshot when a controller is attached.
+      s.cpu = mockCpu(mockRef.current);
 
       // Auto-cycle screens.
       if (autoCycle && now - lastAutoCycleRef.current >= AUTO_CYCLE_MS) {
